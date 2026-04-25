@@ -3,7 +3,7 @@
 //
 // Запуск бенчмарка:
 //
-//	go test -bench=. -benchmem -benchtime=10s ./internal/knn/
+//	go test -bench=. -benchmem -count=5 -benchtime=10s ./internal/knn/
 package knn
 
 import (
@@ -17,7 +17,6 @@ import (
 // и обучает KNN-классификатор (k=3, метрика — евклидово расстояние).
 // Возвращает обученный классификатор и один тестовый экземпляр.
 func loadIrisAndTrain() (*knn.KNNClassifier, base.FixedDataGrid) {
-	// Загрузка датасета Iris из CSV
 	raw, err := base.ParseCSVToInstances("../../testdata/iris.csv", true)
 	if err != nil {
 		panic("не удалось загрузить iris.csv: " + err.Error())
@@ -26,20 +25,36 @@ func loadIrisAndTrain() (*knn.KNNClassifier, base.FixedDataGrid) {
 	// Разбивка 70% обучение / 30% тест
 	train, test := base.InstancesTrainTestSplit(raw, 0.70)
 
-	// Создание и обучение классификатора
 	cls := knn.NewKnnClassifier("euclidean", "linear", 3)
 	cls.Fit(train)
 
-	// Получаем первую строку через Slice
-	// DenseInstances имеет метод Slice для извлечения подвыборки
-	var singleSample base.FixedDataGrid
-	if denseTest, ok := test.(*base.DenseInstances); ok {
-		singleSample = denseTest.Slice(0, 1)
-	} else {
-		panic("test is not *base.DenseInstances")
-	}
+	singleSample := base.NewInstancesViewFromVisible(test, []int{0}, test.AllAttributes())
 
 	return cls, singleSample
+}
+
+func loadIrisAndTrainBatch(batchSize int) (*knn.KNNClassifier, base.FixedDataGrid) {
+	raw, err := base.ParseCSVToInstances("../../testdata/iris.csv", true)
+	if err != nil {
+		panic("не удалось загрузить iris.csv: " + err.Error())
+	}
+
+	train, test := base.InstancesTrainTestSplit(raw, 0.70)
+	cls := knn.NewKnnClassifier("euclidean", "linear", 3)
+	cls.Fit(train)
+
+	_, testRows := test.Size()
+	if testRows < batchSize {
+		batchSize = testRows
+	}
+
+	rowIndices := make([]int, batchSize)
+	for i := range rowIndices {
+		rowIndices[i] = i
+	}
+	batch := base.NewInstancesViewFromVisible(test, rowIndices, test.AllAttributes())
+
+	return cls, batch
 }
 
 // BenchmarkKNNInference замеряет время выполнения одного предсказания
@@ -59,29 +74,7 @@ func BenchmarkKNNInference(b *testing.B) {
 
 // BenchmarkKNNInferenceBatch32 замеряет инференс для батча из 32 сэмплов
 func BenchmarkKNNInferenceBatch32(b *testing.B) {
-	raw, err := base.ParseCSVToInstances("../../testdata/iris.csv", true)
-	if err != nil {
-		panic(err)
-	}
-	
-	train, test := base.InstancesTrainTestSplit(raw, 0.70)
-	cls := knn.NewKnnClassifier("euclidean", "linear", 3)
-	cls.Fit(train)
-
-	// Берём первые 32 строки тестовой выборки (или меньше)
-	_, testRows := test.Size()
-	batchSize := 32
-	if testRows < batchSize {
-		batchSize = testRows
-	}
-
-	// Используем Slice для создания батча
-	var batch base.FixedDataGrid
-	if denseTest, ok := test.(*base.DenseInstances); ok {
-		batch = denseTest.Slice(0, batchSize)
-	} else {
-		panic("test is not *base.DenseInstances")
-	}
+	cls, batch := loadIrisAndTrainBatch(32)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -94,13 +87,13 @@ func BenchmarkKNNInferenceBatch32(b *testing.B) {
 	}
 }
 
-// BenchmarkKNNInferenceFullTest - простой бенчмарк на всём тестовом наборе
+// BenchmarkKNNInferenceFullTest — бенчмарк на всём тестовом наборе
 func BenchmarkKNNInferenceFullTest(b *testing.B) {
 	raw, err := base.ParseCSVToInstances("../../testdata/iris.csv", true)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	train, test := base.InstancesTrainTestSplit(raw, 0.70)
 	cls := knn.NewKnnClassifier("euclidean", "linear", 3)
 	cls.Fit(train)

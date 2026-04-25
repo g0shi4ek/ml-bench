@@ -1,0 +1,16 @@
+{
+  "docker_image_sizes": {
+    "go_bench_bytes": 7638863,
+    "go_bench_mb": 7.2,
+    "python_bench_bytes": 374550817,
+    "python_bench_mb": 357.1,
+    "ratio_python_go": 49.0
+  },
+  "notes": {
+    "go_base_image":     "alpine:3.19 (multi-stage build)",
+    "go_builder_image":  "golang:1.22-alpine",
+    "python_base_image": "python:3.11-slim",
+    "python_torch":      "CPU-only (pytorch.org/whl/cpu)",
+    "measurement_date":  "2026-04-25T17:11:58+03:00"
+  }
+}

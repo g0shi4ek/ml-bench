@@ -1,32 +1,28 @@
-# ── Этап 1: сборка ──────────────────────────────────────────────────────────
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /build
 
-# Кешируем зависимости отдельно от исходников
 COPY go-bench/go.mod go-bench/go.sum ./
 RUN go mod download
 
 COPY go-bench/ ./
 
-# Собираем бинарник бенчмарка
-# CGO_ENABLED=0 — чистый Go без C-зависимостей → минимальный образ
-# -ldflags="-s -w" — убираем символы отладки → уменьшаем размер
-RUN CGO_ENABLED=0 GOOS=linux go build \
+# CGO_ENABLED=1 — golearn требует CGO для оптимизированного KNN
+RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-s -w" \
     -o /bench-runner \
     ./cmd/bench/
 
-# ── Этап 2: минимальный runtime-образ ────────────────────────────────────────
-# scratch — пустой образ, только наш бинарник
-# Итоговый размер образа: ~10-15 МБ (против ~2-5 ГБ для Python+PyTorch)
-FROM scratch
+FROM alpine:3.19
+
+ENV ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.24
 
 WORKDIR /app
 COPY --from=builder /bench-runner /app/bench-runner
 COPY go-bench/testdata/ /app/testdata/
 
-# Директория для результатов — монтируется как volume
 VOLUME ["/app/results"]
 
 ENTRYPOINT ["/app/bench-runner"]

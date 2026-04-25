@@ -1,0 +1,10 @@
+go-bench/.gomodcache/
+go-bench/.gopath/
+python-bench/.venv/
+python-bench/__pycache__/
+results/
+.git/
+.idea/
+.vscode/
+.DS_Store
+*.swp

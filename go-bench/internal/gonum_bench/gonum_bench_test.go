@@ -2,6 +2,10 @@
 // линейной алгебры и сравнивает производительность с наивной реализацией
 // на срезах [][]float64.
 //
+// Задача: Создание двух плотных матриц (матрица признаков X размером 150x4,
+// как в Iris, и вектор весов W размером 4x1). Выполнение их умножения
+// 10 000 раз в цикле с замером производительности.
+//
 // Запуск:
 //
 //	go test -bench=. -benchmem -count=5 ./internal/gonum_bench/
@@ -19,10 +23,12 @@ const (
 	cols = 4   // число признаков (Iris: 4 признака)
 )
 
-// ----- Вспомогательные функции инициализации -----
-
 // makeGonumMatrices создаёт матрицу признаков X (150x4) и вектор весов W (4x1)
 // с помощью gonum/mat.NewDense. Значения заполняются случайными числами.
+//
+// mat.NewDense(r, c, data) принимает плоский срез []float64 длиной r*c.
+// Данные хранятся в row-major порядке — это обеспечивает оптимальную
+// cache locality при последовательном обходе строк.
 func makeGonumMatrices() (*mat.Dense, *mat.Dense) {
 	dataX := make([]float64, rows*cols)
 	for i := range dataX {
@@ -38,6 +44,8 @@ func makeGonumMatrices() (*mat.Dense, *mat.Dense) {
 }
 
 // makeSliceMatrices создаёт эквивалентные матрицы как [][]float64.
+// Каждая строка — отдельный срез, что приводит к фрагментации памяти:
+// строки могут располагаться в разных участках кучи, ухудшая cache locality.
 func makeSliceMatrices() ([][]float64, []float64) {
 	X := make([][]float64, rows)
 	for i := range X {
@@ -53,8 +61,13 @@ func makeSliceMatrices() ([][]float64, []float64) {
 	return X, W
 }
 
-// naiveMul наивное матрично-векторное произведение на срезах.
+// naiveMul — наивное матрично-векторное произведение на срезах.
 // Сложность O(rows*cols). Результат: вектор длиной rows.
+//
+// Проблемы этой реализации:
+// 1. make([]float64, len(X)) — аллокация на каждый вызов → нагрузка на GC
+// 2. Нет SIMD-векторизации — компилятор Go генерирует скалярный код
+// 3. Нет блочного доступа к памяти (cache tiling)
 func naiveMul(X [][]float64, W []float64) []float64 {
 	result := make([]float64, len(X))
 	for i, row := range X {
@@ -65,6 +78,18 @@ func naiveMul(X [][]float64, W []float64) []float64 {
 		result[i] = sum
 	}
 	return result
+}
+
+// naiveMulPrealloc — наивное произведение с предвыделенным буфером.
+// Устраняет аллокацию, но не решает проблему отсутствия SIMD.
+func naiveMulPrealloc(X [][]float64, W []float64, result []float64) {
+	for i, row := range X {
+		sum := 0.0
+		for j, v := range row {
+			sum += v * W[j]
+		}
+		result[i] = sum
+	}
 }
 
 // ----- Бенчмарки -----
@@ -114,6 +139,21 @@ func BenchmarkNaiveSliceMul(b *testing.B) {
 	}
 }
 
+// BenchmarkNaiveSliceMulPrealloc замеряет наивное произведение
+// с предвыделенным буфером — устраняет аллокации, но не SIMD.
+func BenchmarkNaiveSliceMulPrealloc(b *testing.B) {
+	X, W := makeSliceMatrices()
+	result := make([]float64, rows)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		naiveMulPrealloc(X, W, result)
+		_ = result[0]
+	}
+}
+
 // BenchmarkGonumMatMulPrealloc демонстрирует важность предварительного
 // выделения результирующей матрицы для минимизации GC-давления.
 func BenchmarkGonumMatMulPrealloc(b *testing.B) {
@@ -137,6 +177,37 @@ func BenchmarkGonumMatMulPrealloc(b *testing.B) {
 			result := mat.NewDense(rows, 1, nil)
 			result.Mul(X, W)
 			_ = result.At(0, 0)
+		}
+	})
+}
+
+// BenchmarkManualLoop10K — ручной бенчмарк с фиксированным числом итераций
+// (10 000), как указано в задании. Выводит результат через b.ReportMetric.
+func BenchmarkManualLoop10K(b *testing.B) {
+	const iters = 10_000
+
+	b.Run("Gonum_10K", func(b *testing.B) {
+		X, W := makeGonumMatrices()
+		result := mat.NewDense(rows, 1, nil)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < iters; j++ {
+				result.Mul(X, W)
+			}
+		}
+		_ = result.At(0, 0)
+	})
+
+	b.Run("NaiveSlice_10K", func(b *testing.B) {
+		X, W := makeSliceMatrices()
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j := 0; j < iters; j++ {
+				result := naiveMul(X, W)
+				_ = result[0]
+			}
 		}
 	})
 }

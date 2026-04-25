@@ -1,6 +1,6 @@
 module github.com/g0shi4ek/ml-bench
 
-go 1.25.1
+go 1.24.0
 
 require (
 	github.com/sjwhitworth/golearn v0.0.0-20221228163002-74ae077eafb2

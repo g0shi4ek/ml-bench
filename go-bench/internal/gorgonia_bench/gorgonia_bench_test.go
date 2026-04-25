@@ -12,13 +12,12 @@
 // При x=5, y=3: z=16, dz/dx=10, dz/dy=-6
 //
 // Запуск:
-//
-//	go test -v -run TestGorgoniaAutograd ./internal/gorgonia_bench/
-//	go test -bench=BenchmarkGorgoniaInference -benchmem ./internal/gorgonia_bench/
+// ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.26 go test -bench=. -benchmem -count=5 ./internal/gorgonia_bench/
 package gorgoniabench
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	g "gorgonia.org/gorgonia"
@@ -40,10 +39,21 @@ import (
 //     записывая промежуточные значения на «ленту» для обратного прохода.
 //     Это прямой аналог Session.run() в TensorFlow 1.x.
 //
+//  4. Управление памятью узлов:
+//     - Каждый узел (*Node) содержит указатель на Value (интерфейс).
+//     - При исполнении TapeMachine выделяет память под промежуточные
+//       значения и градиенты (dual values).
+//     - BindDualValues() привязывает к узлам «двойственные значения»
+//       (dual values) — пару (значение, градиент), как в forward-mode AD.
+//     - После vm.RunAll() градиенты доступны через node.Deriv().
+//     - vm.Close() освобождает все ресурсы ленты.
+//
 // Ключевое отличие от PyTorch (define-by-run / eager):
 // в Gorgonia граф строится явно ДО исполнения, что соответствует
 // парадигме define-and-run TF 1.x. Это ограничивает динамические
-// архитектуры, но открывает возможности статической оптимизации графа.
+// архитектуры (условные ветвления, циклы зависящие от данных),
+// но открывает возможности статической оптимизации графа
+// (constant folding, dead code elimination, operator fusion).
 func buildGraph(xVal, yVal float64) (
 	graph *g.ExprGraph,
 	zNode *g.Node,
@@ -67,7 +77,7 @@ func buildGraph(xVal, yVal float64) (
 	// Шаг 3: построить граф вычислений.
 	// g.Must() — вспомогательная обёртка: паникует при ошибке построения.
 	// Каждый вызов Add/Sub/Mul добавляет узел в граф и возвращает его.
-	sum  := g.Must(g.Add(xNode, yNode))  // узел: x + y
+	sum := g.Must(g.Add(xNode, yNode))   // узел: x + y
 	diff := g.Must(g.Sub(xNode, yNode))  // узел: x - y
 	zNode = g.Must(g.Mul(sum, diff))     // узел: (x+y)*(x-y)
 
@@ -75,20 +85,28 @@ func buildGraph(xVal, yVal float64) (
 }
 
 // TestGorgoniaAutograd проверяет корректность автоматического дифференцирования.
+//
+// Алгоритм:
+// 1. Строим граф z = (x+y)*(x-y)
+// 2. Вызываем g.Grad(z, x, y) — Gorgonia добавляет узлы обратного прохода
+// 3. Создаём TapeMachine с BindDualValues для x и y
+// 4. Исполняем граф (RunAll)
+// 5. Читаем градиенты через node.Deriv()
 func TestGorgoniaAutograd(t *testing.T) {
 	graph, zNode, xNode, yNode := buildGraph(5.0, 3.0)
 
 	// Шаг 4: объявить, по каким переменным нужны градиенты.
-	// Gorgonia добавит в граф узлы обратного прохода.
-	// Метод Grad() возвращает узлы-градиенты в том же порядке.
-	grads, err := g.Grad(zNode, xNode, yNode)
+	// Gorgonia добавит в граф узлы обратного прохода (reverse-mode AD).
+	// Это аналог loss.backward() в PyTorch, но выполняется на этапе
+	// построения графа, а не при исполнении.
+	_, err := g.Grad(zNode, xNode, yNode)
 	if err != nil {
 		t.Fatalf("Grad: %v", err)
 	}
 
 	// Шаг 5: создать TapeMachine и исполнить граф.
-	// WithLeaveOnTape() — оставлять значения на ленте после RunAll()
-	// (нужно для последующего чтения градиентов через .Deriv()).
+	// BindDualValues() — привязать к узлам x и y «двойственные значения»,
+	// чтобы после исполнения можно было прочитать градиенты через Deriv().
 	vm := g.NewTapeMachine(graph, g.BindDualValues(xNode, yNode))
 	defer vm.Close() // освобождает ресурсы ленты и GPU-буферы (если есть)
 
@@ -97,9 +115,21 @@ func TestGorgoniaAutograd(t *testing.T) {
 	}
 
 	// Шаг 6: прочитать результаты.
+	// zNode.Value() — значение прямого прохода
+	// xNode.Deriv() — градиент dz/dx, записанный при обратном проходе
 	zVal := zNode.Value().Data().(float64)
-	dzdx := grads[0].Value().Data().(float64)
-	dzdy := grads[1].Value().Data().(float64)
+
+	xDeriv, err := xNode.Grad()
+	if err != nil {
+		t.Fatalf("xNode.Grad(): %v", err)
+	}
+	dzdx := xDeriv.Data().(float64)
+
+	yDeriv, err := yNode.Grad()
+	if err != nil {
+		t.Fatalf("yNode.Grad(): %v", err)
+	}
+	dzdy := yDeriv.Data().(float64)
 
 	fmt.Printf("\n=== Gorgonia Autograd Demo ===\n")
 	fmt.Printf("x = 5.0, y = 3.0\n")
@@ -107,20 +137,72 @@ func TestGorgoniaAutograd(t *testing.T) {
 	fmt.Printf("dz/dx = 2x = %.1f  (ожидается 10.0)\n", dzdx)
 	fmt.Printf("dz/dy = -2y = %.1f  (ожидается -6.0)\n", dzdy)
 
-	// Проверки корректности
-	if zVal != 16.0 {
-		t.Errorf("z: got %.1f, want 16.0", zVal)
+	const eps = 1e-10
+	if math.Abs(zVal-16.0) > eps {
+		t.Errorf("z: got %.6f, want 16.0", zVal)
 	}
-	if dzdx != 10.0 {
-		t.Errorf("dz/dx: got %.1f, want 10.0", dzdx)
+	if math.Abs(dzdx-10.0) > eps {
+		t.Errorf("dz/dx: got %.6f, want 10.0", dzdx)
 	}
-	if dzdy != -6.0 {
-		t.Errorf("dz/dy: got %.1f, want -6.0", dzdy)
+	if math.Abs(dzdy-(-6.0)) > eps {
+		t.Errorf("dz/dy: got %.6f, want -6.0", dzdy)
+	}
+}
+
+// TestGorgoniaAutogradParametric проверяет автоградиент для нескольких
+// наборов входных значений, подтверждая формулы dz/dx=2x, dz/dy=-2y.
+func TestGorgoniaAutogradParametric(t *testing.T) {
+	testCases := []struct {
+		x, y           float64
+		wantZ          float64
+		wantDzDx       float64
+		wantDzDy       float64
+	}{
+		{x: 5, y: 3, wantZ: 16, wantDzDx: 10, wantDzDy: -6},
+		{x: 1, y: 0, wantZ: 1, wantDzDx: 2, wantDzDy: 0},
+		{x: 0, y: 0, wantZ: 0, wantDzDx: 0, wantDzDy: 0},
+		{x: 10, y: 7, wantZ: 51, wantDzDx: 20, wantDzDy: -14},
+		{x: -3, y: 2, wantZ: 5, wantDzDx: -6, wantDzDy: -4},
+	}
+
+	for _, tc := range testCases {
+		name := fmt.Sprintf("x=%.0f_y=%.0f", tc.x, tc.y)
+		t.Run(name, func(t *testing.T) {
+			graph, zNode, xNode, yNode := buildGraph(tc.x, tc.y)
+
+			_, err := g.Grad(zNode, xNode, yNode)
+			if err != nil {
+				t.Fatalf("Grad: %v", err)
+			}
+
+			vm := g.NewTapeMachine(graph, g.BindDualValues(xNode, yNode))
+			defer vm.Close()
+
+			if err := vm.RunAll(); err != nil {
+				t.Fatalf("RunAll: %v", err)
+			}
+
+			zVal := zNode.Value().Data().(float64)
+			xGrad, _ := xNode.Grad()
+			yGrad, _ := yNode.Grad()
+			dzdx := xGrad.Data().(float64)
+			dzdy := yGrad.Data().(float64)
+
+			const eps = 1e-10
+			if math.Abs(zVal-tc.wantZ) > eps {
+				t.Errorf("z: got %.6f, want %.1f", zVal, tc.wantZ)
+			}
+			if math.Abs(dzdx-tc.wantDzDx) > eps {
+				t.Errorf("dz/dx: got %.6f, want %.1f", dzdx, tc.wantDzDx)
+			}
+			if math.Abs(dzdy-tc.wantDzDy) > eps {
+				t.Errorf("dz/dy: got %.6f, want %.1f", dzdy, tc.wantDzDy)
+			}
+		})
 	}
 }
 
 // BenchmarkGorgoniaInference замеряет инференс (только прямой проход)
-// без пересборки графа — как это происходит в продакшн-сервисе.
 func BenchmarkGorgoniaInference(b *testing.B) {
 	// Граф строится один раз ДО цикла бенчмарка
 	graph, zNode, xNode, yNode := buildGraph(5.0, 3.0)
@@ -138,6 +220,30 @@ func BenchmarkGorgoniaInference(b *testing.B) {
 		_ = xNode
 		_ = yNode
 		vm.Reset() // сброс ленты для повторного исполнения
+		if err := vm.RunAll(); err != nil {
+			b.Fatalf("RunAll: %v", err)
+		}
+		_ = zNode.Value()
+	}
+}
+
+// BenchmarkGorgoniaWithGrad замеряет полный цикл: прямой + обратный проход.
+func BenchmarkGorgoniaWithGrad(b *testing.B) {
+	graph, zNode, xNode, yNode := buildGraph(5.0, 3.0)
+
+	_, err := g.Grad(zNode, xNode, yNode)
+	if err != nil {
+		b.Fatalf("Grad: %v", err)
+	}
+
+	vm := g.NewTapeMachine(graph, g.BindDualValues(xNode, yNode))
+	defer vm.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		vm.Reset()
 		if err := vm.RunAll(); err != nil {
 			b.Fatalf("RunAll: %v", err)
 		}

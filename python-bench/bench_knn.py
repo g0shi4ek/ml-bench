@@ -3,10 +3,14 @@
 Функционально эквивалентен Go-реализации в go-bench/internal/knn/.
 
 Использование:
+    cd python-bench
     python bench_knn.py
 
+Или из корня проекта:
+    python python-bench/bench_knn.py
+
 Требования:
-    pip install scikit-learn numpy pandas matplotlib
+    pip install scikit-learn numpy matplotlib
 
 Интерпретация результатов:
     - mean_ns:   среднее время одного предсказания в наносекундах.
@@ -32,11 +36,24 @@ import platform
 import sys
 from pathlib import Path
 
+from typing import Optional
+
 import numpy as np
 from sklearn.datasets import load_iris
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+
+
+# Определяем корень проекта относительно расположения скрипта
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+# В Docker скрипты лежат в /app/, поэтому parent = / и results = /results (неверно).
+# Если parent — корень ФС, используем SCRIPT_DIR/results (= /app/results в Docker).
+if PROJECT_ROOT == Path("/"):
+    RESULTS_DIR = SCRIPT_DIR / "results"
+else:
+    RESULTS_DIR = PROJECT_ROOT / "results"
 
 
 # ──────────────────────────────────────────────
@@ -94,27 +111,27 @@ def benchmark_single_inference(clf, sample, n_iterations: int = 10_000) -> dict:
         # Переводим в наносекунды (1 сек = 1e9 нс)
         timings_ns.append((t_end - t_start) * 1e9)
 
-    mean_ns   = statistics.mean(timings_ns)
-    stdev_ns  = statistics.stdev(timings_ns)
-    p50_ns    = np.percentile(timings_ns, 50)
-    p95_ns    = np.percentile(timings_ns, 95)
-    p99_ns    = np.percentile(timings_ns, 99)
-    min_ns    = min(timings_ns)
-    max_ns    = max(timings_ns)
+    mean_ns  = statistics.mean(timings_ns)
+    stdev_ns = statistics.stdev(timings_ns)
+    p50_ns   = float(np.percentile(timings_ns, 50))
+    p95_ns   = float(np.percentile(timings_ns, 95))
+    p99_ns   = float(np.percentile(timings_ns, 99))
+    min_ns   = min(timings_ns)
+    max_ns   = max(timings_ns)
 
     return {
-        "name":         "KNNInference_single",
-        "iterations":   n_iterations,
-        "mean_ns":      round(mean_ns, 2),
-        "stdev_ns":     round(stdev_ns, 2),
-        "p50_ns":       round(float(p50_ns), 2),
-        "p95_ns":       round(float(p95_ns), 2),
-        "p99_ns":       round(float(p99_ns), 2),
-        "min_ns":       round(min_ns, 2),
-        "max_ns":       round(max_ns, 2),
-        "mean_us":      round(mean_ns / 1e3, 3),
-        "mean_ms":      round(mean_ns / 1e6, 6),
-        "timings_ns":   timings_ns,   # сырые данные для построения гистограммы
+        "name":       "KNNInference_single",
+        "iterations": n_iterations,
+        "mean_ns":    round(mean_ns, 2),
+        "stdev_ns":   round(stdev_ns, 2),
+        "p50_ns":     round(p50_ns, 2),
+        "p95_ns":     round(p95_ns, 2),
+        "p99_ns":     round(p99_ns, 2),
+        "min_ns":     round(min_ns, 2),
+        "max_ns":     round(max_ns, 2),
+        "mean_us":    round(mean_ns / 1e3, 3),
+        "mean_ms":    round(mean_ns / 1e6, 6),
+        "timings_ns": timings_ns,  # сырые данные для построения гистограммы
     }
 
 
@@ -137,10 +154,10 @@ def benchmark_batch_inference(clf, X_test: np.ndarray, n_iterations: int = 1000)
 
     mean_ns = statistics.mean(timings_ns)
     return {
-        "name":       "KNNInference_batch",
-        "batch_size": len(X_test),
-        "iterations": n_iterations,
-        "mean_ns":    round(mean_ns, 2),
+        "name":          "KNNInference_batch",
+        "batch_size":    len(X_test),
+        "iterations":    n_iterations,
+        "mean_ns":       round(mean_ns, 2),
         "ns_per_sample": round(mean_ns / len(X_test), 2),
     }
 
@@ -149,9 +166,15 @@ def benchmark_batch_inference(clf, X_test: np.ndarray, n_iterations: int = 1000)
 # 4. Построение гистограммы распределения латентности
 # ──────────────────────────────────────────────
 
-def plot_latency_histogram(timings_ns: list, output_path: str = "results/latency_hist.png"):
+def plot_latency_histogram(timings_ns: list,
+                           output_path: Optional[str] = None):
     """Строит гистограмму распределения времени инференса."""
+    if output_path is None:
+        output_path = str(RESULTS_DIR / "latency_hist.png")
+
     try:
+        import matplotlib
+        matplotlib.use("Agg")  # неинтерактивный бэкенд — работает без GUI
         import matplotlib.pyplot as plt
         import matplotlib.ticker as mticker
 
@@ -170,15 +193,20 @@ def plot_latency_histogram(timings_ns: list, output_path: str = "results/latency
 
         ax.set_xlabel("Латентность инференса (µs)", fontsize=12)
         ax.set_ylabel("Число измерений", fontsize=12)
-        ax.set_title("Распределение латентности KNN инференса\n(Python / scikit-learn, n=10 000)", fontsize=13)
+        ax.set_title(
+            "Распределение латентности KNN инференса\n"
+            "(Python / scikit-learn, n=10 000)",
+            fontsize=13,
+        )
         ax.legend()
         ax.xaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
 
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
         fig.tight_layout()
-        fig.savefig(output_path, dpi=150)
+        fig.savefig(str(out), dpi=150)
         plt.close(fig)
-        print(f"  Гистограмма сохранена: {output_path}")
+        print(f"  Гистограмма сохранена: {out}")
     except ImportError:
         print("  matplotlib не установлен — гистограмма не построена.")
 
@@ -188,8 +216,10 @@ def plot_latency_histogram(timings_ns: list, output_path: str = "results/latency
 # ──────────────────────────────────────────────
 
 def save_results(single_result: dict, batch_result: dict,
-                 output_path: str = "results/python_results.json"):
+                 output_path: Optional[str] = None):
     """Сохраняет результаты в JSON для последующего сравнения с Go."""
+    if output_path is None:
+        output_path = str(RESULTS_DIR / "python_results.json")
 
     # Убираем сырые timings из JSON (слишком большой массив)
     single_clean = {k: v for k, v in single_result.items() if k != "timings_ns"}
@@ -203,10 +233,11 @@ def save_results(single_result: dict, batch_result: dict,
         "results": [single_clean, batch_result],
     }
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(out), "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
-    print(f"  Результаты сохранены: {output_path}")
+    print(f"  Результаты сохранены: {out}")
 
 
 # ──────────────────────────────────────────────
@@ -221,7 +252,7 @@ def main():
     print("  Python KNN Benchmark (scikit-learn)")
     print("=" * 55)
 
-    print("\n[1/4] Подготовка модели...")
+    print(f"\n[1/4] Подготовка модели...")
     clf, single_sample, X_test = prepare_model()
 
     print(f"\n[2/4] Инференс одного сэмпла (n={N_SINGLE:,})...")
@@ -246,7 +277,7 @@ def main():
     print(f"    p99    = {single_result['p99_ns']:>10.1f} ns")
     print(f"    mean   = {single_result['mean_us']:>10.3f} µs/op")
     print(f"\n  Примечание: для сравнения с Go запустите:")
-    print(f"    go test -bench=BenchmarkKNNInference -benchmem ./go-bench/internal/knn/")
+    print(f"    cd go-bench && go test -bench=BenchmarkKNNInference -benchmem ./internal/knn/")
     print("=" * 55)
 
 

@@ -1,0 +1,59 @@
+{
+  "system": {
+    "go_version": "go1.24.13",
+    "goos": "linux",
+    "goarch": "arm64",
+    "num_cpu": 2,
+    "gomaxprocs": 2
+  },
+  "results": [
+    {
+      "name": "KNNInference_single",
+      "iterations": 10000,
+      "ns_per_op": 104113.1725,
+      "ms_per_op": 0.1041131725,
+      "allocs_per_op": 0,
+      "bytes_per_op": 0,
+      "timestamp": "2026-04-25T14:12:18.360545232Z",
+      "go_version": "go1.24.13",
+      "goos": "linux",
+      "goarch": "arm64"
+    },
+    {
+      "name": "GonumMatMul_150x4",
+      "iterations": 10000,
+      "ns_per_op": 2412.6026,
+      "ms_per_op": 0.0024126026,
+      "allocs_per_op": 0,
+      "bytes_per_op": 0,
+      "timestamp": "2026-04-25T14:12:18.384999347Z",
+      "go_version": "go1.24.13",
+      "goos": "linux",
+      "goarch": "arm64"
+    },
+    {
+      "name": "NaiveSliceMul_150x4",
+      "iterations": 10000,
+      "ns_per_op": 1119.2872,
+      "ms_per_op": 0.0011192872,
+      "allocs_per_op": 0,
+      "bytes_per_op": 0,
+      "timestamp": "2026-04-25T14:12:18.396417474Z",
+      "go_version": "go1.24.13",
+      "goos": "linux",
+      "goarch": "arm64"
+    },
+    {
+      "name": "GorgoniaAutograd",
+      "iterations": 10000,
+      "ns_per_op": 12001.7371,
+      "ms_per_op": 0.0120017371,
+      "allocs_per_op": 0,
+      "bytes_per_op": 0,
+      "timestamp": "2026-04-25T14:12:18.518400672Z",
+      "go_version": "go1.24.13",
+      "goos": "linux",
+      "goarch": "arm64"
+    }
+  ]
+}

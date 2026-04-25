@@ -1,21 +1,5 @@
-version: "3.9"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ml-bench: сравнительный бенчмарк Go vs Python
-#
-# Использование:
-#   docker-compose up --build          # запустить все бенчмарки
-#   docker-compose up go-bench         # только Go
-#   docker-compose up python-bench     # только Python
-#   docker stats --no-stream           # замер RAM во время выполнения
-#
-# Метрики размера образов:
-#   docker images | grep ml-bench
-# ─────────────────────────────────────────────────────────────────────────────
-
 services:
 
-  # ── Go бенчмарк ────────────────────────────────────────────────────────────
   go-bench:
     build:
       context: .
@@ -24,7 +8,6 @@ services:
     container_name: ml-bench-go
     volumes:
       - ./results:/app/results
-    # Ограничения ресурсов: для честного сравнения используем одинаковые лимиты
     deploy:
       resources:
         limits:
@@ -32,8 +15,8 @@ services:
           memory: 512M
     environment:
       - GOMAXPROCS=2
+      - ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH=go1.24
 
-  # ── Python бенчмарк ────────────────────────────────────────────────────────
   python-bench:
     build:
       context: .
@@ -47,13 +30,11 @@ services:
       resources:
         limits:
           cpus: "2.0"
-          memory: 512M
+          memory: 2G  # PyTorch требует больше RAM
+    environment:
+      - MPLBACKEND=Agg
 
-  # ── Сравнение результатов ──────────────────────────────────────────────────
   compare:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.python
     image: ml-bench/python-bench:latest
     container_name: ml-bench-compare
     working_dir: /app

@@ -11,10 +11,13 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"gonum.org/v1/gonum/mat"
+	g "gorgonia.org/gorgonia"
+	"gorgonia.org/tensor"
 
 	"github.com/sjwhitworth/golearn/base"
 	"github.com/sjwhitworth/golearn/knn"
@@ -36,16 +39,16 @@ type BenchResult struct {
 
 // SystemInfo содержит информацию об окружении.
 type SystemInfo struct {
-	GoVersion string `json:"go_version"`
-	GOOS      string `json:"goos"`
-	GOARCH    string `json:"goarch"`
-	NumCPU    int    `json:"num_cpu"`
-	GOMAXPROCS int   `json:"gomaxprocs"`
+	GoVersion  string `json:"go_version"`
+	GOOS       string `json:"goos"`
+	GOARCH     string `json:"goarch"`
+	NumCPU     int    `json:"num_cpu"`
+	GOMAXPROCS int    `json:"gomaxprocs"`
 }
 
 // Report — итоговый отчёт.
 type Report struct {
-	System  SystemInfo   `json:"system"`
+	System  SystemInfo    `json:"system"`
 	Results []BenchResult `json:"results"`
 }
 
@@ -55,11 +58,11 @@ func main() {
 	flag.Parse()
 
 	sysInfo := SystemInfo{
-		GoVersion:   runtime.Version(),
-		GOOS:        runtime.GOOS,
-		GOARCH:      runtime.GOARCH,
-		NumCPU:      runtime.NumCPU(),
-		GOMAXPROCS:  runtime.GOMAXPROCS(0),
+		GoVersion:  runtime.Version(),
+		GOOS:       runtime.GOOS,
+		GOARCH:     runtime.GOARCH,
+		NumCPU:     runtime.NumCPU(),
+		GOMAXPROCS: runtime.GOMAXPROCS(0),
 	}
 
 	fmt.Printf("Система: %s %s %s\n", sysInfo.GoVersion, sysInfo.GOOS, sysInfo.GOARCH)
@@ -68,25 +71,31 @@ func main() {
 	var results []BenchResult
 
 	// --- Бенчмарк 1: KNN Inference ---
-	fmt.Printf("[1/3] Бенчмарк KNN инференса (n=%d)...\n", *iterations)
+	fmt.Printf("[1/4] Бенчмарк KNN инференса (n=%d)...\n", *iterations)
 	knnResult := benchKNN(*iterations)
 	results = append(results, knnResult)
 	fmt.Printf("  KNN  : %.0f ns/op | %.3f ms/op\n", knnResult.NsPerOp, knnResult.MsPerOp)
 
 	// --- Бенчмарк 2: Gonum матричное умножение ---
-	fmt.Printf("[2/3] Бенчмарк Gonum матричного умножения (n=%d)...\n", *iterations)
+	fmt.Printf("[2/4] Бенчмарк Gonum матричного умножения (n=%d)...\n", *iterations)
 	gonumResult := benchGonum(*iterations)
 	results = append(results, gonumResult)
 	fmt.Printf("  Gonum: %.0f ns/op | %.3f ms/op\n", gonumResult.NsPerOp, gonumResult.MsPerOp)
 
 	// --- Бенчмарк 3: Naive slice умножение ---
-	fmt.Printf("[3/3] Бенчмарк наивного умножения срезов (n=%d)...\n", *iterations)
+	fmt.Printf("[3/4] Бенчмарк наивного умножения срезов (n=%d)...\n", *iterations)
 	naiveResult := benchNaiveSlice(*iterations)
 	results = append(results, naiveResult)
 	fmt.Printf("  Naive: %.0f ns/op | %.3f ms/op\n", naiveResult.NsPerOp, naiveResult.MsPerOp)
 
+	// --- Бенчмарк 4: Gorgonia автоградиент ---
+	fmt.Printf("[4/4] Бенчмарк Gorgonia автоградиента (n=%d)...\n", *iterations)
+	gorgoniaResult := benchGorgonia(*iterations)
+	results = append(results, gorgoniaResult)
+	fmt.Printf("  Gorgonia: %.0f ns/op | %.3f ms/op\n", gorgoniaResult.NsPerOp, gorgoniaResult.MsPerOp)
+
 	// Speedup Gonum vs Naive
-	if naiveResult.NsPerOp > 0 {
+	if naiveResult.NsPerOp > 0 && gonumResult.NsPerOp > 0 {
 		speedup := naiveResult.NsPerOp / gonumResult.NsPerOp
 		fmt.Printf("\nGonum быстрее naive в %.1fx раз\n", speedup)
 	}
@@ -99,6 +108,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Создаём директорию для результатов, если не существует
+	if dir := filepath.Dir(*outputPath); dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "mkdir error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	if err := os.WriteFile(*outputPath, data, 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "write error: %v\n", err)
 		os.Exit(1)
@@ -106,15 +123,29 @@ func main() {
 	fmt.Printf("\nРезультаты сохранены в: %s\n", *outputPath)
 }
 
+// benchKNN загружает Iris, обучает KNN и замеряет инференс.
 func benchKNN(n int) BenchResult {
 	raw, err := base.ParseCSVToInstances("testdata/iris.csv", true)
 	if err != nil {
-		panic("iris.csv not found. Run from project root: cp testdata/iris.csv .")
+		fmt.Fprintf(os.Stderr, "WARN: iris.csv not found (%v), skipping KNN bench\n", err)
+		return BenchResult{
+			Name:      "KNNInference_single",
+			NsPerOp:   0,
+			MsPerOp:   0,
+			Timestamp: time.Now(),
+			GoVersion: runtime.Version(),
+			GOOS:      runtime.GOOS,
+			GOARCH:    runtime.GOARCH,
+		}
 	}
+
 	train, test := base.InstancesTrainTestSplit(raw, 0.70)
 	cls := knn.NewKnnClassifier("euclidean", "linear", 3)
 	cls.Fit(train)
-	sample, _ := base.GetInstancesFromRange(test, 0, 1)
+
+	// Получаем первую строку тестовой выборки через NewInstancesViewFromVisible
+	// (DenseInstances не имеет метода Slice; используем view-обёртку)
+	sample := base.NewInstancesViewFromVisible(test, []int{0}, test.AllAttributes())
 
 	// Прогрев
 	for i := 0; i < 100; i++ {
@@ -140,11 +171,18 @@ func benchKNN(n int) BenchResult {
 	}
 }
 
+// benchGonum замеряет матричное умножение X(150x4) * W(4x1) через gonum/mat.
+// Gonum использует оптимизированный BLAS-бэкенд (gonum/blas/native),
+// который применяет блочные алгоритмы и loop unrolling.
 func benchGonum(n int) BenchResult {
 	dataX := make([]float64, 150*4)
 	dataW := make([]float64, 4)
-	for i := range dataX { dataX[i] = rand.Float64() }
-	for i := range dataW { dataW[i] = rand.Float64() }
+	for i := range dataX {
+		dataX[i] = rand.Float64()
+	}
+	for i := range dataW {
+		dataW[i] = rand.Float64()
+	}
 	X := mat.NewDense(150, 4, dataX)
 	W := mat.NewDense(4, 1, dataW)
 	result := mat.NewDense(150, 1, nil)
@@ -174,14 +212,20 @@ func benchGonum(n int) BenchResult {
 	}
 }
 
+// benchNaiveSlice замеряет наивное матрично-векторное произведение
+// на чистых Go-срезах [][]float64 без BLAS-оптимизации.
 func benchNaiveSlice(n int) BenchResult {
 	X := make([][]float64, 150)
 	for i := range X {
 		X[i] = make([]float64, 4)
-		for j := range X[i] { X[i][j] = rand.Float64() }
+		for j := range X[i] {
+			X[i][j] = rand.Float64()
+		}
 	}
 	W := make([]float64, 4)
-	for i := range W { W[i] = rand.Float64() }
+	for i := range W {
+		W[i] = rand.Float64()
+	}
 
 	// Прогрев
 	for i := 0; i < 100; i++ {
@@ -209,6 +253,67 @@ func benchNaiveSlice(n int) BenchResult {
 	nsPerOp := float64(elapsed.Nanoseconds()) / float64(n)
 	return BenchResult{
 		Name:       "NaiveSliceMul_150x4",
+		Iterations: n,
+		NsPerOp:    nsPerOp,
+		MsPerOp:    nsPerOp / 1e6,
+		Timestamp:  time.Now(),
+		GoVersion:  runtime.Version(),
+		GOOS:       runtime.GOOS,
+		GOARCH:     runtime.GOARCH,
+	}
+}
+
+// benchGorgonia замеряет автоградиент для z = (x+y)*(x-y)
+// Использует Gorgonia для построения вычислительного графа и reverse-mode AD.
+func benchGorgonia(n int) BenchResult {
+	// Строим граф z = (x+y)*(x-y)
+	graph := g.NewGraph()
+	x := g.NewScalar(graph, tensor.Float64, g.WithName("x"), g.WithValue(5.0))
+	y := g.NewScalar(graph, tensor.Float64, g.WithName("y"), g.WithValue(3.0))
+	sum := g.Must(g.Add(x, y))
+	diff := g.Must(g.Sub(x, y))
+	z := g.Must(g.Mul(sum, diff))
+
+	// Добавляем градиенты
+	_, err := g.Grad(z, x, y)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Gorgonia Grad error: %v\n", err)
+		return BenchResult{
+			Name:      "GorgoniaAutograd",
+			NsPerOp:   0,
+			MsPerOp:   0,
+			Timestamp: time.Now(),
+			GoVersion: runtime.Version(),
+			GOOS:      runtime.GOOS,
+			GOARCH:    runtime.GOARCH,
+		}
+	}
+
+	// Создаём TapeMachine
+	vm := g.NewTapeMachine(graph, g.BindDualValues(x, y))
+	defer vm.Close()
+
+	// Прогрев
+	for i := 0; i < 100; i++ {
+		vm.Reset()
+		if err := vm.RunAll(); err != nil {
+			fmt.Fprintf(os.Stderr, "Gorgonia RunAll error: %v\n", err)
+		}
+	}
+
+	// Бенчмарк
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		vm.Reset()
+		if err := vm.RunAll(); err != nil {
+			fmt.Fprintf(os.Stderr, "Gorgonia RunAll error: %v\n", err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	nsPerOp := float64(elapsed.Nanoseconds()) / float64(n)
+	return BenchResult{
+		Name:       "GorgoniaAutograd",
 		Iterations: n,
 		NsPerOp:    nsPerOp,
 		MsPerOp:    nsPerOp / 1e6,
