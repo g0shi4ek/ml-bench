@@ -1,0 +1,20 @@
+# ── Python benchmark контейнер ───────────────────────────────────────────────
+# python:3.11-slim (~130 МБ базовый образ)
+# После установки scikit-learn + numpy + matplotlib: ~550-700 МБ
+# Для сравнения: Go scratch образ — ~12 МБ
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Устанавливаем зависимости (отдельный слой для кеша Docker)
+COPY python-bench/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY python-bench/ ./
+
+# Директория для результатов
+VOLUME ["/app/results"]
+
+# Запуск KNN бенчмарка
+CMD ["python", "bench_knn.py"]
