@@ -1,49 +1,49 @@
 {
   "system": {
-    "python_version": "3.11.15 (main, Apr 22 2026, 02:12:31) [GCC 14.2.0]",
-    "platform": "Linux-6.8.0-64-generic-aarch64-with-glibc2.41",
-    "processor": ""
+    "python_version": "3.8.20 (default, Jan 26 2026, 14:51:48) \n[Clang 17.0.0 (clang-1700.0.13.5)]",
+    "platform": "macOS-15.5-arm64-arm-64bit",
+    "processor": "arm"
   },
   "results": [
     {
       "name": "KNNInference_single",
       "iterations": 10000,
-      "mean_ns": 521995.61,
-      "stdev_ns": 631669.75,
-      "p50_ns": 473466.99,
-      "p95_ns": 696559.16,
-      "p99_ns": 1185916.42,
-      "min_ns": 443092.02,
-      "max_ns": 48570842.95,
-      "mean_us": 521.996,
-      "mean_ms": 0.521996
+      "mean_ns": 140814.98,
+      "stdev_ns": 73957.97,
+      "p50_ns": 137375.0,
+      "p95_ns": 153250.0,
+      "p99_ns": 207250.0,
+      "min_ns": 121583.0,
+      "max_ns": 7403792.0,
+      "mean_us": 140.815,
+      "mean_ms": 0.140815
     },
     {
       "name": "KNNInference_batch",
       "batch_size": 45,
       "iterations": 1000,
-      "mean_ns": 525997.19,
-      "ns_per_sample": 11688.83
+      "mean_ns": 446899.45,
+      "ns_per_sample": 9931.1
     },
     {
       "name": "NumPyMatMul_150x4",
-      "mean_ns": 1594.8,
-      "std_ns": 499.82,
-      "p99_ns": 1667.01
+      "mean_ns": 3971.01,
+      "std_ns": 158184.12,
+      "p99_ns": 2208.0
     },
     {
       "name": "PurePythonMatMul_150x4",
-      "mean_ns": 73074.35,
-      "std_ns": 9355.4,
-      "p99_ns": 93086.66
+      "mean_ns": 74536.3,
+      "std_ns": 7120.89,
+      "p99_ns": 98208.83
     },
     {
       "name": "PyTorchAutograd",
-      "mean_ns": 39740.5747,
-      "ms_per_op": 0.039740574699999996,
-      "min_ns": 36250,
-      "max_ns": 257088,
-      "iterations": 10000
+      "mean_ns": 20943.84884,
+      "ms_per_op": 0.020943848839999998,
+      "min_ns": 18125,
+      "max_ns": 679125,
+      "iterations": 100000
     }
   ]
 }

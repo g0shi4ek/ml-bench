@@ -1,58 +1,58 @@
 {
   "system": {
-    "go_version": "go1.24.13",
-    "goos": "linux",
+    "go_version": "go1.26.2",
+    "goos": "darwin",
     "goarch": "arm64",
-    "num_cpu": 2,
-    "gomaxprocs": 2
+    "num_cpu": 8,
+    "gomaxprocs": 8
   },
   "results": [
     {
       "name": "KNNInference_single",
       "iterations": 10000,
-      "ns_per_op": 104113.1725,
-      "ms_per_op": 0.1041131725,
+      "ns_per_op": 31704.35,
+      "ms_per_op": 0.03170435,
       "allocs_per_op": 0,
       "bytes_per_op": 0,
-      "timestamp": "2026-04-25T14:12:18.360545232Z",
-      "go_version": "go1.24.13",
-      "goos": "linux",
+      "timestamp": "2026-05-01T14:19:51.985898+03:00",
+      "go_version": "go1.26.2",
+      "goos": "darwin",
       "goarch": "arm64"
     },
     {
       "name": "GonumMatMul_150x4",
       "iterations": 10000,
-      "ns_per_op": 2412.6026,
-      "ms_per_op": 0.0024126026,
+      "ns_per_op": 2143.7166,
+      "ms_per_op": 0.0021437166,
       "allocs_per_op": 0,
       "bytes_per_op": 0,
-      "timestamp": "2026-04-25T14:12:18.384999347Z",
-      "go_version": "go1.24.13",
-      "goos": "linux",
+      "timestamp": "2026-05-01T14:19:52.007597+03:00",
+      "go_version": "go1.26.2",
+      "goos": "darwin",
       "goarch": "arm64"
     },
     {
       "name": "NaiveSliceMul_150x4",
       "iterations": 10000,
-      "ns_per_op": 1119.2872,
-      "ms_per_op": 0.0011192872,
+      "ns_per_op": 1121.4792,
+      "ms_per_op": 0.0011214792,
       "allocs_per_op": 0,
       "bytes_per_op": 0,
-      "timestamp": "2026-04-25T14:12:18.396417474Z",
-      "go_version": "go1.24.13",
-      "goos": "linux",
+      "timestamp": "2026-05-01T14:19:52.018956+03:00",
+      "go_version": "go1.26.2",
+      "goos": "darwin",
       "goarch": "arm64"
     },
     {
       "name": "GorgoniaAutograd",
       "iterations": 10000,
-      "ns_per_op": 12001.7371,
-      "ms_per_op": 0.0120017371,
+      "ns_per_op": 28109.8292,
+      "ms_per_op": 0.0281098292,
       "allocs_per_op": 0,
       "bytes_per_op": 0,
-      "timestamp": "2026-04-25T14:12:18.518400672Z",
-      "go_version": "go1.24.13",
-      "goos": "linux",
+      "timestamp": "2026-05-01T14:19:52.302844+03:00",
+      "go_version": "go1.26.2",
+      "goos": "darwin",
       "goarch": "arm64"
     }
   ]
